@@ -10,6 +10,8 @@ default_git_email=$git_email
 if [ "${default_git_email}" == "" ]; then default_git_email="${USER}@bloomhealthco.com"; fi
 
 function configureGit() {
+    configure_git="Y"
+
     if (( "${#git_name}" > 0 )) && (( "${#git_email}" > 0 )) && (( "${#ssh_public_key}" > 0 )); then
         configure_git=$(askYesNo "Do you wish to configure git")
     fi
@@ -49,6 +51,7 @@ function configureGit() {
             else
                 echo "Generating SSH keypair..."
                 ssh-keygen -t rsa -C "${git_email}"
+                ssh_public_key=`cat ~/.ssh/id_rsa.pub`
             fi
         else
             echo "You should generated an SSH key pair for use with GitHub so you dont' have to enter your username and password every time."
