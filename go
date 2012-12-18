@@ -6,6 +6,7 @@ function main() {
     bloomLogo
     installGitCore
     downloadGiHubMac
+    installGitFlowMac
     configureGit
     setupGithubUsername
     checkGitHubConnection
@@ -121,7 +122,7 @@ function pingRepo() {
         echo "Git Repo Ping was ${GREEN}successful${RESET}."
         echo ""
     else
-        echo "${RED} Failed to access ${WHITE}${repo_ssh_url}${RED}. Please ensure your SSH keys are setup correctly, and you have added your public SSH key to GitHub through the SSH Keys admin screen."
+        echo "${RED} Failed to access ${WHITE}${repo_ssh_url}${RED}. Please ensure your SSH keys are setup correctly, and you have added your public SSH key to GitHub through the SSH Keys admin screen.${RESET}"
         exit
     fi
 }
@@ -156,10 +157,42 @@ function verifyRepo() {
             found_git_repo=1
 
             # setting head to origin master
+            echo "${WHITE}Fetching all remote branches${RESET}..."
             git fetch --all
+            git checkout master
+            echo "Setting remote head to origin/master."
             git remote set-head origin master > /dev/null
+            echo "Checking for git flow branches..."
+            # See if there's a develop branh
+            local_develop_branch=`git branch |grep -E '\<develop\>'`
+            origin_develop_branch=`git branch -r |grep -E '\<origin\>/\<develop\>'`
+            upstream_develop_branch=`git branch -r |grep -E '\<upstream\>/\<develop\>'`
+            # If there's a upstream develop branch...
+            if (( ${#upstream_develop_branch} > 0 )); then
+                if (( ${#local_develop_branch} > 0 )); then
+                    git checkout develop
+                    git pull -u origin develop
+                elif (( ${#origin_develop_branch} > 0 )); then
+                    git checkout -t origin/develop
+                else
+                    echo "${GREEN}Upstream has a 'develop' branch, but your 'local' and 'origin' repos do not.  Creating them...${RESET}"
+                    echo " * ${WHITE}Checkout local 'master' branch${RESET}"
+                    echo " * ${WHITE}Create local 'develop' branch${RESET}"
+                    echo " * ${WHITE}Pull in upstream 'develop' branch${RESET}"
+                    echo " * ${WHITE}Create remote origin 'develop' branch${RESET}"
+                    echo " * ${WHITE}Set upstream for local 'develop' branch to be origin/develop${RESET}"
+                    git checkout master && \
+                        git checkout -b develop && \
+                        git pull upstream develop && \
+                        git push origin develop && \
+                        git branch --set-upstream develop origin/develop
+                fi
+                git flow init -d > /dev/null
+            else
+                echo "No ${RED}upstream/develop${RESET} branch found. Skipping."
+            fi
         else
-            echo "${WHITE}${repo_dir}${RED} is not a Git repository.  Renaming it to ${repo_dir}-GITBACKUP."
+            echo "${WHITE}${repo_dir}${RESET} is not a Git repository.  Renaming it to ${repo_dir}-GITBACKUP."
             mv "${repo_dir}" "${repo_dir}-GITBACKUP"
         fi
         popd > /dev/null
@@ -172,6 +205,13 @@ function verifyRepo() {
         git init > /dev/null
         git remote add origin ${repo_user_ssh_url} > /dev/null
         git remote add upstream ${repo_bloom_ssh_url} > /dev/null
+        git fetch --all
+        upstream_develop_branch=`grep -E '\<upstream\>/\<develop\>'`
+        # If there's a upstream develop branch...
+        if (( ${#upstream_develop_branch} > 0 )); then
+            git update -t origin/develop
+            git flow init -d > /dev/null
+        fi
         popd > /dev/null
     fi
 }
@@ -230,6 +270,8 @@ default_git_email=$git_email
 if [ "${default_git_email}" == "" ]; then default_git_email="${USER}@bloomhealthco.com"; fi
 
 function configureGit() {
+    configure_git="Y"
+
     if (( "${#git_name}" > 0 )) && (( "${#git_email}" > 0 )) && (( "${#ssh_public_key}" > 0 )); then
         configure_git=$(askYesNo "Do you wish to configure git")
     fi
@@ -269,6 +311,7 @@ function configureGit() {
             else
                 echo "Generating SSH keypair..."
                 ssh-keygen -t rsa -C "${git_email}"
+                ssh_public_key=`cat ~/.ssh/id_rsa.pub`
             fi
         else
             echo "You should generated an SSH key pair for use with GitHub so you dont' have to enter your username and password every time."
@@ -343,6 +386,7 @@ function setupGithubUsername() {
 ######################## SOFTWARE INSTALLATION ######################
 homebrew_version=`brew --version 2> /dev/null`
 git_version=`git version 2> /dev/null`
+git_flow_version=`git flow version 2> /dev/null`
 
 # This function will download GitHub Mac client
 function downloadGiHubMac() {
@@ -404,44 +448,36 @@ function installGitCoreLinux() {
 }
 
 function installGitFlowMac() {
-    if [ "${git_version}" == "" ] && [ "${os_version}" == "Darwin" ]; then
-        if [ "${homebrew_version}" != "" ]; then
-            brew install git-flow
+    # Ensure git is installed, and this is running on Linux
+    if (( ${#git_version} > 0 )) && [ "${os_version}" == "Darwin" ] ; then
+        # GitFlow Latest Version URL
+        git_flow_version_url="https://raw.github.com/petervanderdoes/gitflow/master/git-flow-version"
+        # expected git flow version
+        expected_version=`curl -fsSkL "${git_flow_version_url}" |grep -E '^GITFLOW_VERSION=' |sed -e 's/GITFLOW_VERSION=//'`
+        echo -n "Looking for Git Flow version '${expected_version}'..."
+        install_git_flow="N"
+        if (( ${#git_flow_version} == 0 )); then
+            echo "none found."
+            install_git_flow="Y"
+        elif [[ "${expected_version}" =~ "${git_flow_version} " ]]; then
+            echo "different version found."
+            install_git_flow=$(askYesNo "Do you wish to install GitFlow ${expected_version}, (${YELLOW}You have ${git_flow_version} installed.${RESET})")
         else
-            gitflow_install_url="https://github.com/nvie/gitflow/wiki/Mac-OS-X"
-            dl_url='https://github.com/downloads/timcharper/git_osx_installer/git-1.8.0.1-intel-universal-snow-leopard.dmg'
-            dl_file='git-mac-latest.dmg'
-            dl_location="${HOME}/Downloads/"
-            dl_path="${dl_location}${dl_file}"
-
-            if [ ! -d ${dl_location} ]; then
-                mkdir -p ${dl_location}
-            fi
-
-            if [ ! -f ${dl_path} ]; then
-                echo "Downloading git core."
-                curl -L ${dl_url} > ${dl_path} || rm -f ${dl_path}
-            fi
-
-            if [ -f ${dl_path} ]; then
-                echo "Mounting git core DMG..."
-                hdiutil attach ${dl_path}
-
-                git_installer=`ls -d /Volumes/Git*/*.pkg`
-                if [ "${git_installer}" != "" ]; then
-                    echo "${GREEN}Please follow the installer's on-screen instructions, and then re-run this script.${RESET}"
-                    echo ""
-                    open "${git_installer}"
-                else
-                    echo "Unable to find installer.  Please run Git Core installer and then re-run this script"
-                fi
-                echo "You will need to install git-flow ${RED}by hand${RESET} since you do not have ${WHITE}homebrew${RESET} installed."
-                open "${gitflow_install_url}"
-                echo ""
-            else
-                echo "Failed to download git core."
-            fi
+            echo "found."
         fi
+
+        if [ "${install_git_flow}" == "Y" ]; then
+            echo "Installing ${GREEN}Git Flow${RESET} from ${WHITE}https://github.com/petervanderdoes/gitflow${RESET} ..."
+            bash -c "$(curl -fsSkL https://raw.github.com/petervanderdoes/gitflow/develop/contrib/gitflow-installer.sh)" gitflow-installer.sh install stable
+        fi
+    fi
+    # Ensure gnu-getopt is installed.
+    brew install gnu-getopt > /dev/null
+    # Ensure the getopt alias is set
+    if [ ! -e "${HOME}/.gitflow_export" ]; then
+        echo 'alias getopt="$(brew --prefix gnu-getopt)/bin/getopt"' > "${HOME}/.gitflow_export"
+    elif (! grep -q 'alias getopt'); then
+        echo 'alias getopt="$(brew --prefix gnu-getopt)/bin/getopt"' >> "${HOME}/.gitflow_export"
     fi
 }
 
@@ -477,8 +513,6 @@ function installGitCoreMac() {
                 else
                     echo "Unable to find installer.  Please run Git Core installer and then re-run this script"
                 fi
-                echo "You will need to install git-flow ${RED}by hand${RESET} since you do not have ${WHITE}homebrew${RESET} installed."
-                open "${gitflow_install_url}"
                 echo ""
             else
                 echo "Failed to download git core."

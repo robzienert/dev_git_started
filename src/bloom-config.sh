@@ -106,7 +106,7 @@ function pingRepo() {
         echo "Git Repo Ping was ${GREEN}successful${RESET}."
         echo ""
     else
-        echo "${RED} Failed to access ${WHITE}${repo_ssh_url}${RED}. Please ensure your SSH keys are setup correctly, and you have added your public SSH key to GitHub through the SSH Keys admin screen."
+        echo "${RED} Failed to access ${WHITE}${repo_ssh_url}${RED}. Please ensure your SSH keys are setup correctly, and you have added your public SSH key to GitHub through the SSH Keys admin screen.${RESET}"
         exit
     fi
 }
@@ -141,10 +141,42 @@ function verifyRepo() {
             found_git_repo=1
 
             # setting head to origin master
+            echo "${WHITE}Fetching all remote branches${RESET}..."
             git fetch --all
+            git checkout master
+            echo "Setting remote head to origin/master."
             git remote set-head origin master > /dev/null
+            echo "Checking for git flow branches..."
+            # See if there's a develop branh
+            local_develop_branch=`git branch |grep -E '\<develop\>'`
+            origin_develop_branch=`git branch -r |grep -E '\<origin\>/\<develop\>'`
+            upstream_develop_branch=`git branch -r |grep -E '\<upstream\>/\<develop\>'`
+            # If there's a upstream develop branch...
+            if (( ${#upstream_develop_branch} > 0 )); then
+                if (( ${#local_develop_branch} > 0 )); then
+                    git checkout develop
+                    git pull -u origin develop
+                elif (( ${#origin_develop_branch} > 0 )); then
+                    git checkout -t origin/develop
+                else
+                    echo "${GREEN}Upstream has a 'develop' branch, but your 'local' and 'origin' repos do not.  Creating them...${RESET}"
+                    echo " * ${WHITE}Checkout local 'master' branch${RESET}"
+                    echo " * ${WHITE}Create local 'develop' branch${RESET}"
+                    echo " * ${WHITE}Pull in upstream 'develop' branch${RESET}"
+                    echo " * ${WHITE}Create remote origin 'develop' branch${RESET}"
+                    echo " * ${WHITE}Set upstream for local 'develop' branch to be origin/develop${RESET}"
+                    git checkout master && \
+                        git checkout -b develop && \
+                        git pull upstream develop && \
+                        git push origin develop && \
+                        git branch --set-upstream develop origin/develop
+                fi
+                git flow init -d > /dev/null
+            else
+                echo "No ${RED}upstream/develop${RESET} branch found. Skipping."
+            fi
         else
-            echo "${WHITE}${repo_dir}${RED} is not a Git repository.  Renaming it to ${repo_dir}-GITBACKUP."
+            echo "${WHITE}${repo_dir}${RESET} is not a Git repository.  Renaming it to ${repo_dir}-GITBACKUP."
             mv "${repo_dir}" "${repo_dir}-GITBACKUP"
         fi
         popd > /dev/null
@@ -157,6 +189,13 @@ function verifyRepo() {
         git init > /dev/null
         git remote add origin ${repo_user_ssh_url} > /dev/null
         git remote add upstream ${repo_bloom_ssh_url} > /dev/null
+        git fetch --all
+        upstream_develop_branch=`grep -E '\<upstream\>/\<develop\>'`
+        # If there's a upstream develop branch...
+        if (( ${#upstream_develop_branch} > 0 )); then
+            git update -t origin/develop
+            git flow init -d > /dev/null
+        fi
         popd > /dev/null
     fi
 }
